@@ -1,65 +1,75 @@
 const express = require("express");
-const mongoose = require("mongoose");
-require("dotenv").config();
-const autorizationRoute = require("./MW/authorization")
-// const authentication = require("./Route/authentication")
-// const adminRoute = require("./Route/usersRoute")
-// const teacherRoute = require("./Route/childs")
-// const registerRoute = require("./Route/register");
-// const changePasswordRoute = require("./Route/changePassword")
-const swagger = require("./Route/swagger")
-const teacherRoute = require("./Route/teacherRoute")
-const childRoute = require("./Route/childRoute")
-const classRoute = require("./Route/classRoute")
-
 const server = express();
+const morgan = require("morgan");
+const mongoose = require("mongoose");
+const teachersRouters = require("./Routers/teachersRouter");
+const body_parser = require("body-parser"); 
+const childrenRouter = require("./Routers/childrenRouter");
+const authenticationRouter = require("./Routers/authenticationRouter");
+const multer = require("multer");
+const path = require("path");
+require("dotenv").config();
+const swaggerSpec = require('./swaggerDef');
+const swaggerUi = require('swagger-ui-express');
+const classRouter = require("./Routers/classRouters");
 
-const port = process.env.PORT;
 
-mongoose.connect(process.env.db_URL)
-.then(()=>{
-    console.log("DB Connected .....");
-    server.listen(port, ()=>{
-        console.log("I am Listening .....", port);
+
+//image variables
+let storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, path.join(__dirname , "uploads"));
+    },
+    filename: (req, file, cb) => {
+        cb(null, new Date().toLocaleDateString().replace(/\//g, "-") + "-" + file.originalname);
+    }
+})
+
+let fileFilter = (req, file, cb) => {
+    if(file.mimetype=="image/jpeg"
+    || file.mimetype=="image.jpg"
+    || file.mimetype=="image.png") 
+        cb(null, true)
+    else 
+        cb(null, false)
+}
+
+server.use(morgan("dev"));
+
+//connect to the database
+mongoose.connect(process.env.DB_URL)
+    .then(()=>{
+        console.log("connected to the database");
+        let port = process.env.PORT_NUMBER || 8080;
+        server.listen(port, "localhost", ()=>{
+            console.log("I'am listening on port " + port);
+        })
     })
+    .catch(err=>next(err))
+
+//parsing
+server.use(multer({storage}, {fileFilter}).single("image"));
+server.use(body_parser.json());
+server.use(body_parser.urlencoded({extended: false}));
+//routers
+//Swagger UI
+server.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+//AuthenticationRouters
+server.use(authenticationRouter)
+//teachers routers
+server.use(teachersRouters);
+//children routers
+server.use(childrenRouter);
+//class routers
+server.use(classRouter);
+
+//not found MW
+server.use((req, res)=>{
+    res.status(404).json({msg: "Not found!"})
 })
-.catch((error)=>{
-    console.log("DB Connection Problem " + error)
-})
 
-server.use((request, response, next)=>{
-    console.log("Log MiddleWare", request.url, request.method);
-    next();
-});
-
-server.use(express.json()); // to Add body property so we can retreive data from it.
-
-
-//------------------Routes-----------------------
-// server.use((request, response, next)=>{
-//     console.log(request.body);
-//     next();
-// })
-// server.use(authentication);
-// server.use(registerRoute);
-// // server.use(autorizationRoute);
-
-// // server.use(adminRoute);
-// // server.use(teacherRoute);
-
-// // server.use(changePasswordRoute);
-
-// // swagger(server);
-
-// //Ending Middle Wares
-
-server.use(teacherRoute);
-server.use(childRoute);
-server.use(classRoute);
-
-server.use((request, response)=>{
-    response.status(404).json({Message: "Not Found"})
-});
-server.use((error, request, response, next)=>{
-    response.status(error.status || 500).json({Message:error.message});
+//Error MW
+server.use((error, req, res, next)=> {
+    let errorStatus = error.status || 500;
+    res.status(errorStatus).json({Error: error.message});
 })
